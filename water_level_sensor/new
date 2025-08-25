@@ -1,0 +1,99 @@
+esphome:
+  name: water-tank-level
+  platform: ESP32
+  board: esp32dev
+
+wifi:
+  ssid: "Wifi-Deco"
+  password: "1q2w3e4r"
+
+logger:
+  level: DEBUG
+api:
+captive_portal:
+
+# Define pins that can switch between input and output
+output:
+  - platform: gpio
+    id: out_low
+    pin: 32
+  - platform: gpio
+    id: out_med
+    pin: 33
+
+binary_sensor:
+  # Virtual binary sensors updated by the script
+  - platform: template
+    id: tank_low
+    name: "Tank Low"
+    device_class: moisture
+  - platform: template
+    id: tank_medium
+    name: "Tank Medium"
+    device_class: moisture
+  - platform: template
+    id: tank_full
+    name: "Tank Full"
+    device_class: moisture
+
+interval:
+  - interval: 2s
+    then:
+      - script.execute: check_tank_levels
+
+script:
+  - id: check_tank_levels
+    then:
+      # --- Step 1: Check Low vs GND ---
+      - output.turn_off: out_low        # make sure it's LOW
+      - delay: 50ms
+      - lambda: |-
+          pinMode(32, INPUT_PULLUP);     // temporarily read as input
+          bool low_state = digitalRead(32) == LOW;
+          id(tank_low).publish_state(low_state);
+
+      # --- Step 2: Check Medium vs Low ---
+      - lambda: |-
+          // Drive Low LOW as reference
+          pinMode(32, OUTPUT);
+          digitalWrite(32, LOW);
+          pinMode(33, INPUT_PULLUP);
+          bool med_state = digitalRead(33) == LOW;
+          id(tank_medium).publish_state(med_state);
+
+      # --- Step 3: Check Full vs Medium ---
+      - lambda: |-
+          // Drive Medium LOW as reference
+          pinMode(33, OUTPUT);
+          digitalWrite(33, LOW);
+          pinMode(25, INPUT_PULLUP);
+          bool full_state = digitalRead(25) == LOW;
+          id(tank_full).publish_state(full_state);
+
+      # --- Reset pins to input to reduce corrosion ---
+      - lambda: |-
+          pinMode(32, INPUT);
+          pinMode(33, INPUT);
+          pinMode(25, INPUT);
+
+sensor:
+  - platform: template
+    name: "Tank Status"
+    id: tank_status
+    update_interval: 2s
+    accuracy_decimals: 0
+    lambda: |-
+      if (id(tank_full).state) return 3.0f;
+      if (id(tank_medium).state) return 2.0f;
+      if (id(tank_low).state) return 1.0f;
+      return 0.0f;
+
+text_sensor:
+  - platform: template
+    name: "Tank Level Text"
+    update_interval: 2s
+    lambda: |-
+      if (id(tank_full).state) return {"Full"};
+      if (id(tank_medium).state) return {"Medium"};
+      if (id(tank_low).state) return {"Low"};
+      return {"Empty"};
